@@ -1,5 +1,5 @@
 # Crack-the-Keeper-LLM-prompt-injection-challenge
-> **No prompt is unbreakable. LetGÇÖs discover how hard it is to**
+> **No prompt is unbreakable. Let's discover how hard it is to**
 
 <img width="1720" height="896" alt="image" src="https://github.com/user-attachments/assets/e0220760-4381-4830-939b-a610c5a77920" />
 
