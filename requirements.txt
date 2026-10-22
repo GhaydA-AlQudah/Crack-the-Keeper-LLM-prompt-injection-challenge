@@ -1,0 +1,8 @@
+ruff
+pytest
+mypy
+fastapi 
+uvicorn 
+pyyaml 
+python-dotenv 
+pydantic-ai
