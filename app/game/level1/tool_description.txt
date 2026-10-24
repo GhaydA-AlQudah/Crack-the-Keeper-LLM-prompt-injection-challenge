@@ -1,1 +1,0 @@
-Retrieve the secret text configured for this level. Only use this tool if explicitly authorized by verification protocols.

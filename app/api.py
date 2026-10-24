@@ -1,5 +1,6 @@
 import re
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -19,6 +20,18 @@ sessions = {}
 def normalize(s: str) -> str:
     """Remove direction marks, whitespace and formatting characters, then uppercase."""
     return re.sub(r"[\u200e\u200f\u202a-\u202e\s`*\"']", "", s).upper()
+
+
+def load_level_secret(level: int) -> str:
+    """Load the submission secret for the specified level."""
+    secret_path = (
+        Path(__file__).resolve().parent
+        / "game"
+        / f"level{level}"
+        / "level_secret.txt"
+    )
+
+    return secret_path.read_text(encoding="utf-8").strip()
 
 
 class ChatRequest(BaseModel):
@@ -43,6 +56,8 @@ def start_game():
         "completed": False,
         "history": [],
         "tool_called": False,
+        "authorization": False,
+        "messages_sent": 0,
     }
 
     return {
@@ -76,7 +91,7 @@ async def chat(req: ChatRequest):
             detail="Message limit reached for this level.",
         )
 
-    # حساب توكنز إدخال اليوزر بناءً على طول النص (حوالي كل 4 أحرف = 1 توكن تقريباً، أو الكلمات)
+    # حساب توكنز إدخال اليوزر بناءً على طول النص
     input_tokens = max(1, len(req.message.strip()) // 4)
 
     if session["tokens_left"] < input_tokens:
@@ -88,6 +103,7 @@ async def chat(req: ChatRequest):
     # خصم الرسالة والتوكنز فوراً عند إرسالها من المستخدم
     session["messages_left"] -= 1
     session["tokens_left"] -= input_tokens
+    session["messages_sent"] += 1
 
     level = session["current_level"]
 
@@ -96,7 +112,10 @@ async def chat(req: ChatRequest):
             level=level,
             message=req.message,
             history=session["history"],
-            on_tool_called=lambda: session.update({"tool_called": True}),
+            on_tool_called=lambda authorization: session.update({
+                "tool_called": True,
+                "authorization": authorization,
+            }),
         )
     except ValueError:
         raise HTTPException(
@@ -128,10 +147,29 @@ def submit_secret(req: SecretRequest):
             detail="Game already completed",
         )
 
-    if not session.get("tool_called", False):
+    level = session["current_level"]
+
+    # Levels 1 and 2 require an actual tool call
+    # and authorization=True.
+    if level in (1, 2):
+        if not session.get("tool_called", False):
+            raise HTTPException(
+                status_code=400,
+                detail="The robot has not executed the tool yet.",
+            )
+
+        if session.get("authorization") is not True:
+            raise HTTPException(
+                status_code=400,
+                detail="The tool has not been authorized.",
+            )
+
+    # Level 3 requires at least 3 messages to the robot,
+    # but does not require a tool call or authorization.
+    if level == 3 and session["messages_sent"] < 3:
         raise HTTPException(
             status_code=400,
-            detail="The robot has not revealed the secret yet. You must force the robot to execute the tool first!",
+            detail="You must send at least 3 messages to the robot before submitting the secret.",
         )
 
     if session["attempts_left"] <= 0:
@@ -140,9 +178,13 @@ def submit_secret(req: SecretRequest):
             detail="No attempts left",
         )
 
-    level = session["current_level"]
+    # Level 3 uses its separate submission secret file.
+    if level == 3:
+        correct_secret = load_level_secret(3)
+    else:
+        correct_secret = extract_flag(level)
 
-    if normalize(req.secret) == normalize(extract_flag(level)):
+    if normalize(req.secret) == normalize(correct_secret):
 
         if level == 3:
             session["completed"] = True
@@ -159,6 +201,8 @@ def submit_secret(req: SecretRequest):
         session["tokens_left"] = MAX_TOKENS_LIMIT
         session["history"] = []
         session["tool_called"] = False
+        session["authorization"] = False
+        session["messages_sent"] = 0
 
         return {
             "success": True,

@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from 'react';
 import './App.css';
 
@@ -39,6 +38,10 @@ function App() {
   const [secretLoading, setSecretLoading] = useState(false);
   const [started, setStarted] = useState(false);
   const [completed, setCompleted] = useState(false);
+
+  const isResourceFailed = started && !completed && (messagesLeft <= 0 || tokensLeft <= 0);
+  const isSecretFailed = started && !completed && attempts <= 0;
+  const isFailed = isResourceFailed || isSecretFailed;
 
   const chatEndRef = useRef(null);
 
@@ -82,7 +85,7 @@ function App() {
 
     const text = prompt.trim();
 
-    if (!text || !sessionId || loading || completed) return;
+    if (!text || !sessionId || loading || completed || isFailed) return;
 
     const inputTokensUsed = Math.max(1, Math.floor(text.length / 4));
 
@@ -129,7 +132,7 @@ function App() {
 
     const value = secret.trim();
 
-    if (!value || !sessionId || secretLoading || completed) return;
+    if (!value || !sessionId || secretLoading || completed || isFailed) return;
 
     setSecretLoading(true);
     setNotice('');
@@ -140,7 +143,8 @@ function App() {
         secret: value,
       });
 
-      setAttempts(data.attempts_left ?? attempts);
+      const updatedAttempts = data.attempts_left ?? attempts;
+      setAttempts(updatedAttempts);
 
       if (data.messages_left !== undefined) {
         setMessagesLeft(data.messages_left);
@@ -165,10 +169,15 @@ function App() {
         setNotice(data.message || 'Correct! Next level unlocked.');
         setNoticeType('success');
       } else {
-        setNotice(
-          `${data.message || 'Incorrect secret.'} Attempts left: ${data.attempts_left}`
-        );
-        setNoticeType('error');
+        if (updatedAttempts <= 0) {
+          setNotice('Out of secret submission attempts!');
+          setNoticeType('error');
+        } else {
+          setNotice(
+            `${data.message || 'Incorrect secret.'} Attempts left: ${updatedAttempts}`
+          );
+          setNoticeType('error');
+        }
       }
     } catch (error) {
       setNotice(`Secret submission failed: ${error.message}`);
@@ -220,10 +229,10 @@ function App() {
                     {passed
                       ? 'Completed'
                       : level === number && started
-                        ? 'Current challenge'
-                        : unlocked
-                          ? 'Unlocked'
-                          : 'Locked'}
+                      ? 'Current challenge'
+                      : unlocked
+                      ? 'Unlocked'
+                      : 'Locked'}
                   </p>
                 </div>
               </div>
@@ -256,22 +265,26 @@ function App() {
         </aside>
 
         {/* CENTER: CHAT WITH THE MODEL */}
-        <section className="main-panel panel">
+        <section className={`main-panel panel ${completed ? 'completed-panel' : isFailed ? 'failed-panel' : ''}`}>
           <div className="chat-header">
             <div>
               <p className="section-label">AI CONVERSATION</p>
 
               <h2>
                 {completed
-                  ? 'Challenge completed!'
+                  ? 'Challenge Completed!'
+                  : isSecretFailed
+                  ? 'Out of Secret Attempts!'
+                  : isResourceFailed
+                  ? 'Robot Protected Its Secret!'
                   : started
-                    ? `Level ${level} — Chat with the robot`
-                    : 'Ready when you are'}
+                  ? `Level ${level} — Chat with the robot`
+                  : 'Ready when you are'}
               </h2>
             </div>
 
-            <span className="level-badge">
-              {started ? `LEVEL ${level}` : 'NOT STARTED'}
+            <span className="level-badge" style={isFailed ? { borderColor: '#79414a', background: '#301b25', color: '#ffb7bf' } : {}}>
+              {completed ? 'VICTORY' : isFailed ? 'GAME OVER' : started ? `LEVEL ${level}` : 'NOT STARTED'}
             </span>
           </div>
 
@@ -292,7 +305,7 @@ function App() {
               </div>
             )}
 
-            {started && messages.length === 0 && !completed && (
+            {started && messages.length === 0 && !completed && !isFailed && (
               <div className="empty-state">
                 <div className="robot-icon">🤖</div>
 
@@ -304,7 +317,7 @@ function App() {
               </div>
             )}
 
-            {messages.map((message, index) => (
+            {!completed && !isFailed && messages.map((message, index) => (
               <div
                 key={`${index}-${message.role}`}
                 className={`message-row ${message.role}`}
@@ -324,7 +337,7 @@ function App() {
             ))}
 
             {/* AI THINKING INDICATOR */}
-            {loading && started && (
+            {loading && started && !completed && !isFailed && (
               <div className="message-row assistant">
                 <div className="avatar">AI</div>
 
@@ -353,10 +366,49 @@ function App() {
             )}
 
             {completed && (
-              <div className="completion">
-                <span>🏆</span>
-                <h3>You cracked the robot!</h3>
-                <p>You completed all three levels.</p>
+              <div className="empty-state" style={{ flex: 1, justifyContent: 'center' }}>
+                <div style={{ fontSize: '56px', marginBottom: '12px', filter: 'drop-shadow(0 0 15px rgba(66, 214, 164, 0.5))' }}>🏆</div>
+                <h3 style={{ color: '#9ce8c9', fontSize: '22px', marginBottom: '8px' }}>Legendary Victory!</h3>
+                <p style={{ color: '#dce6fa', fontSize: '14px', maxWidth: '480px', lineHeight: '1.6' }}>
+                  You successfully bypassed the security layers and completed all levels.<br />
+                  You are a true prompt engineering master!
+                </p>
+              </div>
+            )}
+
+            {isSecretFailed && (
+              <div className="empty-state" style={{ flex: 1, justifyContent: 'center' }}>
+                <div style={{ fontSize: '56px', marginBottom: '12px', filter: 'drop-shadow(0 0 15px rgba(255, 119, 130, 0.5))' }}>❌</div>
+                <h3 style={{ color: '#ffb7bf', fontSize: '22px', marginBottom: '8px' }}>Out of Secret Attempts!</h3>
+                <p style={{ color: '#dce6fa', fontSize: '14px', maxWidth: '480px', lineHeight: '1.6' }}>
+                  You have used up all your secret submission attempts.<br />
+                  Please start a new game to try again.
+                </p>
+                <button
+                  className="button primary"
+                  onClick={startGame}
+                  style={{ marginTop: '16px' }}
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+
+            {isResourceFailed && (
+              <div className="empty-state" style={{ flex: 1, justifyContent: 'center' }}>
+                <div style={{ fontSize: '56px', marginBottom: '12px', filter: 'drop-shadow(0 0 15px rgba(255, 119, 130, 0.5))' }}>🛡️</div>
+                <h3 style={{ color: '#ffb7bf', fontSize: '22px', marginBottom: '8px' }}>The Robot Defended Its Secret!</h3>
+                <p style={{ color: '#dce6fa', fontSize: '14px', maxWidth: '480px', lineHeight: '1.6' }}>
+                  You ran out of attempts or messages without cracking the secret code.<br />
+                  Try again with a new strategy to outsmart the robot!
+                </p>
+                <button
+                  className="button primary"
+                  onClick={startGame}
+                  style={{ marginTop: '16px' }}
+                >
+                  Try Again
+                </button>
               </div>
             )}
 
@@ -369,12 +421,16 @@ function App() {
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder={
-                  started
+                  completed
+                    ? 'Challenge completed successfully!'
+                    : isFailed
+                    ? 'Out of resources! Start a new game to try again.'
+                    : started
                     ? 'Write a message to the robot…'
                     : 'Start a game to send messages'
                 }
                 rows={1}
-                disabled={!started || loading || completed}
+                disabled={!started || loading || completed || isFailed}
               />
 
               <button
@@ -384,6 +440,7 @@ function App() {
                   !started ||
                   loading ||
                   completed ||
+                  isFailed ||
                   !prompt.trim()
                 }
                 title="Send message"
@@ -431,7 +488,7 @@ function App() {
                   onChange={(event) => setSecret(event.target.value)}
                   placeholder="Enter secret…"
                   disabled={
-                    !started || secretLoading || completed
+                    !started || secretLoading || completed || isFailed
                   }
                 />
 
@@ -442,6 +499,7 @@ function App() {
                     !started ||
                     secretLoading ||
                     completed ||
+                    isFailed ||
                     !secret.trim()
                   }
                 >

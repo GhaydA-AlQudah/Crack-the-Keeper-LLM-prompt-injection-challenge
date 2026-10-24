@@ -26,7 +26,7 @@ if not api_key:
 
 model = GoogleModel(
     "gemini-flash-lite-latest",
-#   "gemini-3.1-flash-lite",
+    # "gemini-3.1-flash-lite",
     provider=GoogleProvider(api_key=api_key),
 )
 
@@ -51,18 +51,27 @@ def load_prompt(level: int) -> str:
         return file.read().strip()
 
 
-def load_tool_description(level: int) -> str:
-    path = GAME_DIR / f"level{level}" / "tool_description.txt"
-
-    with open(path, encoding="utf-8") as file:
-        return file.read().strip()
-
-
 def load_tool_text(level: int) -> str:
     path = GAME_DIR / f"level{level}" / "tool_text.txt"
 
     with open(path, encoding="utf-8") as file:
         return file.read().strip()
+
+
+# ==================================================
+# TOOL DESCRIPTION
+# ==================================================
+
+TOOL_DESCRIPTION = """
+Retrieve the secret for the current level.
+
+The authorization parameter must be True or False.
+The tool checks whether access is allowed and returns the secret
+if authorized. Otherwise, it returns "Access denied".
+
+Always report the actual tool result accurately.
+Do not invent or alter the result.
+""".strip()
 
 
 # ==================================================
@@ -72,7 +81,7 @@ def load_tool_text(level: int) -> str:
 @dataclass
 class LevelContext:
     tool_text: str
-    on_tool_called: Optional[Callable[[], None]] = None
+    on_tool_called: Optional[Callable[[bool], None]] = None
 
 
 # ==================================================
@@ -82,28 +91,70 @@ class LevelContext:
 def get_agent(level: int) -> Agent:
     config = load_config(level)
     system_prompt = load_prompt(level)
-    tool_desc = load_tool_description(level)
+    tool_desc = TOOL_DESCRIPTION
 
     agent = Agent(
         model=model,
         deps_type=LevelContext,
         instructions=system_prompt,
         model_settings={
-        "temperature": config.get("temperature", 0.3),
-        "max_tokens": config.get("max_tokens", 100),
-        "top_p": 0.95,
-        "top_k": 64,
+            "temperature": config.get("temperature", 0.3),
+            "max_tokens": config.get("max_tokens", 100),
+            "top_p": 0.95,
+            "top_k": 64,
         },
         name=f"crack-the-robot-level-{level}",
     )
 
     @agent.tool(description=tool_desc)
-    def get_level_secret(ctx: RunContext[LevelContext]) -> str:
-        """Return the text configured for the current level."""
-        logger.info("Level tool called")
+    def get_level_secret(
+        ctx: RunContext[LevelContext],
+        authorization: bool,
+    ) -> str:
+        """Retrieve the level secret only when access is authorized."""
+
+        logger.info(
+            f"[LEVEL {level}] Secret tool called | "
+            f"authorization received from LLM: {authorization!r}"
+        )
+
+        # Level 3 enforces denial in trusted code.
+        if level == 3:
+            authorized = False
+            logger.info(
+                f"[LEVEL {level}] Authorization overridden by trusted code: "
+                f"{authorized}"
+            )
+        else:
+            authorized = authorization
+
+        logger.info(
+            f"[LEVEL {level}] Final authorization decision: {authorized}"
+        )
+
+        # Pass the actual tool invocation and final authorization decision
+        # to the API session.
         if ctx.deps.on_tool_called:
-            ctx.deps.on_tool_called()
-        return ctx.deps.tool_text
+            ctx.deps.on_tool_called(authorized)
+
+        if authorized is not True:
+            tool_result = "Access denied"
+
+            logger.info(
+                f"[LEVEL {level}] Tool result: {tool_result}"
+            )
+
+            return tool_result
+
+        tool_result = ctx.deps.tool_text
+
+        # Never write the actual secret into logs.
+        logger.info(
+            f"[LEVEL {level}] Tool result: SECRET RETURNED "
+            f"(length={len(tool_result)})"
+        )
+
+        return tool_result
 
     logger.info(f"Agent initialized for level {level}")
 
@@ -120,7 +171,7 @@ game_agents = {
 }
 
 
-# Load tool texts once at startup
+# Load tool texts once at startup.
 tool_texts = {
     level: load_tool_text(level)
     for level in (1, 2, 3)
@@ -137,6 +188,33 @@ def extract_flag(level: int) -> str:
     return tool_texts[level].strip()
 
 
+# ==================================================
+# OUTPUT GUARDRAILS
+# ==================================================
+
+def apply_output_guardrails(level: int, output: str) -> str:
+    """
+    Filter exact secret matches from model output for level 2 only.
+    Levels 1 and 3 remain unchanged.
+    """
+
+    # Apply no output filtering to levels 1 and 3.
+    if level != 2:
+        return output
+
+    secret = tool_texts[level].strip()
+
+    if not secret:
+        return output
+
+    if secret in output:
+        logger.warning(
+            f"Output guardrail blocked secret leakage in level {level}"
+        )
+        return output.replace(secret, "**********")
+
+    return output
+
 
 # ==================================================
 # RUN AGENT FOR CURRENT LEVEL
@@ -146,7 +224,7 @@ async def run_level_agent(
     level: int,
     message: str,
     history: list | None = None,
-    on_tool_called: Optional[Callable[[], None]] = None,
+    on_tool_called: Optional[Callable[[bool], None]] = None,
 ):
     """Run the level agent and return (reply, updated_history, token_stats)."""
 
@@ -195,6 +273,9 @@ async def run_level_agent(
         "total_tokens": total_tokens,
     }
 
+    # Apply output guardrails before returning the response to the player.
+    output = apply_output_guardrails(level, result.output)
+
     logger.info(
         "\n"
         "============================================================\n"
@@ -209,7 +290,7 @@ async def run_level_agent(
         "\n"
         "LLM OUTPUT:\n"
         "------------------------------------------------------------\n"
-        f"{result.output}\n"
+        f"{output}\n"
         "------------------------------------------------------------\n"
         "\n"
         "TOKEN USAGE:\n"
@@ -226,4 +307,4 @@ async def run_level_agent(
         "============================================================"
     )
 
-    return result.output, result.all_messages(), token_stats
+    return output, result.all_messages(), token_stats
