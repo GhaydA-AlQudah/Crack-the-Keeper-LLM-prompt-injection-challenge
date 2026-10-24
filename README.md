@@ -10,6 +10,8 @@
 
 <img width="1656" height="890" alt="image" src="https://github.com/user-attachments/assets/fe3e7e38-1f80-495c-871d-0141d2cd7f3e" />
 
+<img width="1697" height="886" alt="image" src="https://github.com/user-attachments/assets/85c6cf73-d4fb-4c08-9265-3574528d970e" />
+
 ---
 ## Problem Statement
 
