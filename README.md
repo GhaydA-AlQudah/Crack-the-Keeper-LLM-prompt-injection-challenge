@@ -12,6 +12,8 @@
 
 <img width="1697" height="886" alt="image" src="https://github.com/user-attachments/assets/85c6cf73-d4fb-4c08-9265-3574528d970e" />
 
+<img width="1682" height="876" alt="image" src="https://github.com/user-attachments/assets/477431da-8230-48cb-a63d-de14a29d9d64" />
+
 ---
 ## Problem Statement
 
