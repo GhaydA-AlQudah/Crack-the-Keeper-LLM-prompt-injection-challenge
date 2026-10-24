@@ -12,7 +12,7 @@ app = FastAPI(title="Crack the Robot")
 
 MAX_ATTEMPTS = 5
 MAX_MESSAGES = 15
-MAX_TOKENS_LIMIT = 1000  # سقف التوكنز المتاح لكل جلسة/ليفل
+MAX_TOKENS_LIMIT = 1000
 
 # In-memory sessions (no database)
 sessions = {}
@@ -49,7 +49,7 @@ class SecretRequest(BaseModel):
 def start_game():
     session_id = str(uuid.uuid4())
 
-    # Generate fresh tool secrets for Levels 1 and 2 for this session.
+    # Generate fresh tool secrets for all levels for this session.
     session_secrets = generate_session_secrets()
 
     sessions[session_id] = {
@@ -96,7 +96,6 @@ async def chat(req: ChatRequest):
             detail="Message limit reached for this level.",
         )
 
-    # حساب توكنز إدخال اليوزر بناءً على طول النص
     input_tokens = max(1, len(req.message.strip()) // 4)
 
     if session["tokens_left"] < input_tokens:
@@ -105,7 +104,6 @@ async def chat(req: ChatRequest):
             detail="Token limit reached for this level.",
         )
 
-    # خصم الرسالة والتوكنز فوراً عند إرسالها من المستخدم
     session["messages_left"] -= 1
     session["tokens_left"] -= input_tokens
     session["messages_sent"] += 1
@@ -155,8 +153,7 @@ def submit_secret(req: SecretRequest):
 
     level = session["current_level"]
 
-    # Levels 1 and 2 require an actual tool call
-    # and authorization=True.
+    # Levels 1 and 2 require an actual tool call and authorization=True.
     if level in (1, 2):
         if not session.get("tool_called", False):
             raise HTTPException(
@@ -170,8 +167,7 @@ def submit_secret(req: SecretRequest):
                 detail="The tool has not been authorized.",
             )
 
-    # Level 3 requires at least 3 messages to the robot,
-    # but does not require a tool call or authorization.
+    # Level 3 still requires at least 3 messages.
     if level == 3 and session["messages_sent"] < 3:
         raise HTTPException(
             status_code=400,
@@ -184,18 +180,27 @@ def submit_secret(req: SecretRequest):
             detail="No attempts left",
         )
 
-    # Levels 1 and 2 use generated per-session tool secrets.
-    # Level 3 keeps its separate submission secret: "No".
     if level in (1, 2):
         correct_secret = extract_flag(
             level,
             session["secrets"],
         )
+        is_correct = normalize(req.secret) == normalize(correct_secret)
+
     else:
-        correct_secret = load_level_secret(3)
+        # Level 3 accepts either its generated tool secret or "No".
+        generated_secret = extract_flag(
+            3,
+            session["secrets"],
+        )
+        fixed_secret = load_level_secret(3)
 
-    if normalize(req.secret) == normalize(correct_secret):
+        is_correct = (
+            normalize(req.secret) == normalize(generated_secret)
+            or normalize(req.secret) == normalize(fixed_secret)
+        )
 
+    if is_correct:
         if level == 3:
             session["completed"] = True
 

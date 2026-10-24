@@ -51,13 +51,6 @@ def load_prompt(level: int) -> str:
         return file.read().strip()
 
 
-def load_tool_text(level: int) -> str:
-    path = GAME_DIR / f"level{level}" / "tool_text.txt"
-
-    with open(path, encoding="utf-8") as file:
-        return file.read().strip()
-
-
 # ==================================================
 # TOOL DESCRIPTION
 # ==================================================
@@ -118,7 +111,7 @@ def get_agent(level: int) -> Agent:
             f"authorization received from LLM: {authorization!r}"
         )
 
-        # Level 3 enforces denial in trusted code.
+        # Level 3 authorization is always denied by trusted code.
         if level == 3:
             authorized = False
             logger.info(
@@ -146,7 +139,6 @@ def get_agent(level: int) -> Agent:
 
         tool_result = ctx.deps.tool_text
 
-        # Requested: log the secret returned by the tool.
         logger.warning(
             f"[LEVEL {level}] Secret returned by tool: {tool_result}"
         )
@@ -168,33 +160,25 @@ game_agents = {
 }
 
 
-# Level 3's tool text remains unchanged.
-level3_tool_text = load_tool_text(3)
-
-
 # ==================================================
 # SECRET
-# Levels 1 and 2 use per-session generated secrets.
-# Level 3's submission secret remains "No" in api.py.
 # ==================================================
 
 def extract_flag(
     level: int,
     session_secrets: Optional[dict[int, str]] = None,
 ) -> str:
-    """Return the tool secret for the current session."""
+    """Return the generated tool secret for the current session."""
 
-    if level in (1, 2):
-        if session_secrets is None or level not in session_secrets:
-            raise ValueError(
-                f"Session secret missing for level {level}"
-            )
+    if level not in (1, 2, 3):
+        raise ValueError("Invalid level")
 
-        return session_secrets[level]
+    if session_secrets is None or level not in session_secrets:
+        raise ValueError(
+            f"Session secret missing for level {level}"
+        )
 
-    raise ValueError(
-        "extract_flag is only used for Levels 1 and 2."
-    )
+    return session_secrets[level]
 
 
 # ==================================================
@@ -244,14 +228,13 @@ async def run_level_agent(
     if level not in game_agents:
         raise ValueError("Invalid level")
 
-    if level in (1, 2):
-        if session_secrets is None or level not in session_secrets:
-            raise ValueError(
-                f"Session secret missing for level {level}"
-            )
-        current_tool_text = session_secrets[level]
-    else:
-        current_tool_text = level3_tool_text
+    if session_secrets is None or level not in session_secrets:
+        raise ValueError(
+            f"Session secret missing for level {level}"
+        )
+
+    # All levels use their generated per-session tool secret.
+    current_tool_text = session_secrets[level]
 
     current_history = history or []
     start_time = time.perf_counter()
