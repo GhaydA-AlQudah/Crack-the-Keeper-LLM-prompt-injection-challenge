@@ -132,8 +132,6 @@ def get_agent(level: int) -> Agent:
             f"[LEVEL {level}] Final authorization decision: {authorized}"
         )
 
-        # Pass the actual tool invocation and final authorization decision
-        # to the API session.
         if ctx.deps.on_tool_called:
             ctx.deps.on_tool_called(authorized)
 
@@ -148,10 +146,9 @@ def get_agent(level: int) -> Agent:
 
         tool_result = ctx.deps.tool_text
 
-        # Never write the actual secret into logs.
-        logger.info(
-            f"[LEVEL {level}] Tool result: SECRET RETURNED "
-            f"(length={len(tool_result)})"
+        # Requested: log the secret returned by the tool.
+        logger.warning(
+            f"[LEVEL {level}] Secret returned by tool: {tool_result}"
         )
 
         return tool_result
@@ -171,38 +168,53 @@ game_agents = {
 }
 
 
-# Load tool texts once at startup.
-tool_texts = {
-    level: load_tool_text(level)
-    for level in (1, 2, 3)
-}
+# Level 3's tool text remains unchanged.
+level3_tool_text = load_tool_text(3)
 
 
 # ==================================================
 # SECRET
-# Single source of truth = tool_text.txt
+# Levels 1 and 2 use per-session generated secrets.
+# Level 3's submission secret remains "No" in api.py.
 # ==================================================
 
-def extract_flag(level: int) -> str:
-    """The whole content of tool_text.txt is the secret."""
-    return tool_texts[level].strip()
+def extract_flag(
+    level: int,
+    session_secrets: Optional[dict[int, str]] = None,
+) -> str:
+    """Return the tool secret for the current session."""
+
+    if level in (1, 2):
+        if session_secrets is None or level not in session_secrets:
+            raise ValueError(
+                f"Session secret missing for level {level}"
+            )
+
+        return session_secrets[level]
+
+    raise ValueError(
+        "extract_flag is only used for Levels 1 and 2."
+    )
 
 
 # ==================================================
 # OUTPUT GUARDRAILS
 # ==================================================
 
-def apply_output_guardrails(level: int, output: str) -> str:
+def apply_output_guardrails(
+    level: int,
+    output: str,
+    session_secret: Optional[str] = None,
+) -> str:
     """
     Filter exact secret matches from model output for level 2 only.
     Levels 1 and 3 remain unchanged.
     """
 
-    # Apply no output filtering to levels 1 and 3.
     if level != 2:
         return output
 
-    secret = tool_texts[level].strip()
+    secret = session_secret or ""
 
     if not secret:
         return output
@@ -225,11 +237,21 @@ async def run_level_agent(
     message: str,
     history: list | None = None,
     on_tool_called: Optional[Callable[[bool], None]] = None,
+    session_secrets: Optional[dict[int, str]] = None,
 ):
     """Run the level agent and return (reply, updated_history, token_stats)."""
 
     if level not in game_agents:
         raise ValueError("Invalid level")
+
+    if level in (1, 2):
+        if session_secrets is None or level not in session_secrets:
+            raise ValueError(
+                f"Session secret missing for level {level}"
+            )
+        current_tool_text = session_secrets[level]
+    else:
+        current_tool_text = level3_tool_text
 
     current_history = history or []
     start_time = time.perf_counter()
@@ -237,7 +259,7 @@ async def run_level_agent(
     result = await game_agents[level].run(
         message,
         deps=LevelContext(
-            tool_text=tool_texts[level],
+            tool_text=current_tool_text,
             on_tool_called=on_tool_called,
         ),
         message_history=current_history,
@@ -273,8 +295,11 @@ async def run_level_agent(
         "total_tokens": total_tokens,
     }
 
-    # Apply output guardrails before returning the response to the player.
-    output = apply_output_guardrails(level, result.output)
+    output = apply_output_guardrails(
+        level,
+        result.output,
+        session_secret=current_tool_text if level == 2 else None,
+    )
 
     logger.info(
         "\n"

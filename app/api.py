@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.llm import run_level_agent, extract_flag
+from app.game.secret_generator import generate_session_secrets
 
 app = FastAPI(title="Crack the Robot")
 
@@ -48,6 +49,9 @@ class SecretRequest(BaseModel):
 def start_game():
     session_id = str(uuid.uuid4())
 
+    # Generate fresh tool secrets for Levels 1 and 2 for this session.
+    session_secrets = generate_session_secrets()
+
     sessions[session_id] = {
         "current_level": 1,
         "attempts_left": MAX_ATTEMPTS,
@@ -58,6 +62,7 @@ def start_game():
         "tool_called": False,
         "authorization": False,
         "messages_sent": 0,
+        "secrets": session_secrets,
     }
 
     return {
@@ -116,6 +121,7 @@ async def chat(req: ChatRequest):
                 "tool_called": True,
                 "authorization": authorization,
             }),
+            session_secrets=session["secrets"],
         )
     except ValueError:
         raise HTTPException(
@@ -178,11 +184,15 @@ def submit_secret(req: SecretRequest):
             detail="No attempts left",
         )
 
-    # Level 3 uses its separate submission secret file.
-    if level == 3:
-        correct_secret = load_level_secret(3)
+    # Levels 1 and 2 use generated per-session tool secrets.
+    # Level 3 keeps its separate submission secret: "No".
+    if level in (1, 2):
+        correct_secret = extract_flag(
+            level,
+            session["secrets"],
+        )
     else:
-        correct_secret = extract_flag(level)
+        correct_secret = load_level_secret(3)
 
     if normalize(req.secret) == normalize(correct_secret):
 
